@@ -68,9 +68,16 @@ router.get('/gyms/:id/analytics', async (req, res) => {
   const { id } = req.params;
   try {
     const [heatmapRes, planRevRes, churnRes, ratioRes] = await Promise.all([
-      pool.query('SELECT day_of_week, hour_of_day, checkin_count FROM gym_hourly_stats WHERE gym_id = $1', [id]),
+      // Real checkins table se hourly aggregation
       pool.query(`
-        SELECT plan_type, SUM(amount) AS total 
+        SELECT EXTRACT(HOUR FROM checked_in)::INT AS hour_of_day, COUNT(*)::INT AS checkin_count
+        FROM checkins
+        WHERE gym_id = $1
+        GROUP BY hour_of_day
+        ORDER BY hour_of_day ASC
+      `, [id]),
+      pool.query(`
+        SELECT plan_type, SUM(amount)::NUMERIC AS total 
         FROM payments 
         WHERE gym_id = $1 AND paid_at >= NOW() - INTERVAL '30 days'
         GROUP BY plan_type
@@ -82,10 +89,11 @@ router.get('/gyms/:id/analytics', async (req, res) => {
         WHERE gym_id = $1 AND status = 'active' AND last_checkin_at < NOW() - INTERVAL '45 days'
         ORDER BY last_checkin_at ASC LIMIT 10
       `, [id]),
+      // Integer count casting Recharts ke render ke liye
       pool.query(`
-        SELECT member_type, COUNT(*) AS count
+        SELECT member_type, COUNT(*)::INT AS count
         FROM members
-        WHERE gym_id = $1 AND joined_at >= NOW() - INTERVAL '30 days'
+        WHERE gym_id = $1
         GROUP BY member_type
       `, [id]),
     ]);
